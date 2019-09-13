@@ -9,30 +9,39 @@ class Config:
 
     MIN_SIZE = 768 
     MAX_SIZE = 1024
-
+    
     BATCH_SIZE = 1
-
-    MULTI_SCALE_TESTING = False
-
-
-    RPN_BATCH_SIZE = 1
-    FG_RATIO = .5
-    POS_THRESH = .5
-    NEG_THRESH = .5
-    RPN_MIN_SIZE = 1 
-    PRE_NMS_N = 1
-    POST_NMS_N = 1
-    NMS_THRESH = .5
+    BASE_SIZE = 16
+    
     ANCHOR_RATIO = [0.5, 1, 2]
     ANCHOR_SCALE = [8, 16, 32]
+
+    N_CHANNELS = 512
     FEAT_STRIDE = 16
+    RPN_MIN_SIZE = 16
+    NMS_THRESH = .5
+
+    PRE_NMS_N = 500
+    POST_NMS_N = 300
+
+    POS_THRESH = .5
+    NEG_THRESH = .5
+
+    RPN_BATCH_SIZE = 128
+    FG_RATIO = .5
+
+
     FG_THRESH = .5
     BG_THREH_LOW = .3
     BG_THREH_HIGH = .5
 
 
+    POOL_HEIGHT = 7
+    POOL_WIDTH = 7
 
+    FC_LAYERS = 1024
 
+    MULTI_SCALE_TESTING = False
 
     LEVEL_1_LABEL = ['Accordion', 'Adhesive tape', 'Airplane', 'Alarm clock', 'Alpaca', 'Ambulance', 'Ant', 'Antelope',
                     'Apple', 'Artichoke', 'Asparagus', 'Backpack', 'Bagel', 'Balloon', 'Banana', 'Barge', 'Barrel',
@@ -91,5 +100,6 @@ class Config:
                     'Watermelon', 'Whale', 'Wheel', 'Wheelchair', 'Whiteboard', 'Willow', 'Window',
                     'Window blind', 'Wine', 'Wine glass', 'Winter melon', 'Wok', 'Woman', 'Wood-burning stove',
                     'Woodpecker', 'Wrench', 'Zebra', 'Zucchini']
+    N_CLASSES = len(LEVEL_1_LABEL)
 
 cfg = Config()            

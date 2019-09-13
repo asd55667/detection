@@ -12,7 +12,8 @@ def generate_anchors(base_size, ratios, scales):
     hs = (h * scales).flatten()
     x = np.repeat(x.flatten(),3)
     y = np.repeat(y.flatten(),3)
-    return np.stack([x-(ws-1)/2, y-(hs-1)/2, x+(ws-1)/2, y+(hs-1)/2], axis=1)
+    anchors = np.stack([x-(ws-1)/2, y-(hs-1)/2, x+(ws-1)/2, y+(hs-1)/2], axis=1)
+    return anchors
 
 def xxyy2xywh(bbox):
     dim = bbox.ndim-1
@@ -21,19 +22,22 @@ def xxyy2xywh(bbox):
     h = y1 - y0 + 1
     x = x0 + (w-1) * 0.5
     y = y0 + (h-1) * 0.5
-    return np.stack([x,y,w,h], axis=1)
+    return np.hstack([x,y,w,h])
 
     
-
 def shift(anchors, stride, map_size):
-    w,h = map_size
-    x = (np.arange(0,w) + 0.5) * stride
-    y = (np.arange(0,h) + 0.5) * stride
-    xx, yy = np.meshgrid(x,y)
-    shifts = np.stack([xx.ravel(), yy.ravel(), xx.ravel(), yy.ravel()]).T
-    shifts = shifts[:,None]
-    anchors = anchors[None,]
-    return (anchors+shifts).reshape((-1,4))
+    w, h = map_size[0], map_size[1]
+    x = tf.range(w, ) * stride
+    y = tf.range(h, ) * stride
+    xx, yy = tf.meshgrid(x, y)
+    xx = tf.reshape(xx,(-1,))
+    yy = tf.reshape(yy,(-1,))
+    shifts = tf.transpose(tf.stack([xx, yy, xx, yy]))
+
+    anchors = tf.cast(anchors[None,], tf.float32)
+    shifts = tf.cast(shifts[:,None], tf.float32)
+    all_anchors = tf.reshape((anchors + shifts),(-1, 4))
+    return all_anchors
 
 def bbox_transform(anchors, gt_bbox, mean=None, std=None):
     if not mean: mean = np.array([0, 0, 0, 0])
@@ -54,7 +58,7 @@ def bbox_transform(anchors, gt_bbox, mean=None, std=None):
     dw = np.log(w_gt / w_a)[:, None]
     dh = np.log(h_gt / h_a)[:, None]
 
-    return (np.hstack([dx, dy, dw, dh]) - mean ) / std
+    return (tf.stack([dx, dy, dw, dh],axis=1) - mean ) / std
 
 
 def bbox_transform_inv(anchors, delta):
@@ -73,20 +77,4 @@ def bbox_transform_inv(anchors, delta):
     w *= tf.exp(dw)
     h *= tf.exp(dh)
 
-    return tf.stack([x - w/2, y - h/2, x + w/2, y + h/2], axis=1)    
-
-
-def clip_bbox(boxes, img_size):
-
-    xlim, ylim = img_size
-    x0 = tf.clip_by_value(boxes[:, 0], 0, xlim)
-    y0 = tf.clip_by_value(boxes[:, 1], 0, ylim)
-    x1 = tf.clip_by_value(boxes[:, 2], 0, xlim)
-    y1 = tf.clip_by_value(boxes[:, 3], 0, ylim)
-
-    return tf.stack([x0, y0, x1, y1],axis=1)
-
-def filter_bboxs(boxes, min_size):
-    w = boxes[:, 2] - boxes[:, 0]
-    h = boxes[:, 3] - boxes[:, 1]
-    return tf.reshape(tf.where(tf.logical_and(w>=min_size,h>=min_size)),[-1])
+    return tf.stack([x - w/2, y - h/2, x + w/2, y + h/2], axis=1) 

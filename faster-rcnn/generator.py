@@ -1,5 +1,4 @@
 from keras.utils import Sequence
-import keras.backend as K
 import json
 import os
 
@@ -53,7 +52,7 @@ class OIDGen(Sequence):
         w, h = img_info['w'], img_info['h']
         scale = min(self.min_size / min(h,w), self.max_size / max(h,w))
         img = Image.open(self.img_path(idx)).resize((int(w * scale), int(h * scale)))
-        img = K.variable(np.expand_dims(np.array(img),0))
+        img = np.expand_dims(np.array(img),0)
         boxes = img_info['boxes']
         gt_bbox = []
         labels = []
@@ -82,7 +81,7 @@ class ValidationGen(OIDGen):
 
 
 class TestGen(Sequence):
-    def __init__(self, data_dir=cfg.TEST_DIR, batch_size=BATCH_SIZE, aug=cfg.MULTI_SCALE_TESTING):
+    def __init__(self, data_dir=cfg.TEST_DIR, batch_size=cfg.BATCH_SIZE, aug=cfg.MULTI_SCALE_TESTING):
         self.dir = data_dir
         self.batch_size = batch_size
         self.aug = aug
