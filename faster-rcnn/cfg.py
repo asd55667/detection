@@ -6,7 +6,7 @@ class Config:
     TEST_DIR = META_DIR + 'test/'
     OUTPUT_DIR = '/media/wcw/TOSHIBA_X/OID/output/'
     LEVEL_1_DIR = '/media/wcw/TOSHIBA_X/OID/output/level_1_files/'
-
+    MODEL_DIR = 1
     MIN_SIZE = 768 
     MAX_SIZE = 1024
     
@@ -19,27 +19,47 @@ class Config:
     N_CHANNELS = 512
     FEAT_STRIDE = 16
     RPN_MIN_SIZE = 16
-    NMS_THRESH = .5
+    NMS_THRESH = .7
 
-    PRE_NMS_N = 500
-    POST_NMS_N = 300
+    PRE_NMS_N = 12000
+    PRE_NME_N_INFER = 6000  
+    POST_NMS_N = 2000
+    POST_NMS_N_INFER = 1000
+
 
     POS_THRESH = .5
     NEG_THRESH = .5
 
-    RPN_BATCH_SIZE = 128
+    RPN_BATCH_SIZE = 256
     FG_RATIO = .5
 
 
+    
+    N_FG_ROIS = 100
+    N_ROIS = 128
     FG_THRESH = .5
-    BG_THREH_LOW = .3
-    BG_THREH_HIGH = .5
+    BG_THRESH_LO = .1
+    BG_THRESH_HI = .5
 
 
     POOL_HEIGHT = 7
     POOL_WIDTH = 7
 
-    FC_LAYERS = 1024
+    
+    FC_LAYERS = 4096
+    SIGMA = 3.
+
+    NAME = 'FASTER_RCNN'
+
+    LEARNING_RATE = 1e-3
+    LEARNING_MOMENTUM = 0.9
+    WEIGHT_DECAY = 5e-4
+    GRADIENT_CLIP_NORM = 5.
+    # VALIDATION_STEPS = 
+    # STEPS_PER_EPOCH = 
+    
+    LOSS_WEIGHTS = {"rpn_class_loss": 1.,  "rpn_bbox_loss": 1. , "roi_class_loss": 1., "roi_bbox_loss": 1.}
+
 
     MULTI_SCALE_TESTING = False
 
