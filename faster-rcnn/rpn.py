@@ -127,7 +127,7 @@ class RoiPooling(layers.Layer):
             [type] -- [1, POST_NMS_N, pool_heigt, pool_widtd, C]
         """
         x, rois = inputs
-        _, rois = self._trim_pad(rois)
+        # non_zero, rois = self._trim_pad(rois)
 
         def fn(inp):
             # H, W
@@ -147,7 +147,7 @@ class RoiPooling(layers.Layer):
             roi_pool = tf.reshape(tf.stack(roi_pool,axis=0), (self.pool_height,self.pool_width, -1))
             return roi_pool
         rois_pool = tf.map_fn(fn, rois)
-        return rois_pool[None,]
+        return [rois_pool[None,]]#, non_zero]
     
     def _trim_pad(self, rois):
         non_zero = tf.equal(tf.reduce_sum(tf.abs(rois), axis=1), 0)
@@ -156,7 +156,7 @@ class RoiPooling(layers.Layer):
 
     def compute_output_shape(self, input_shape):
         x_shape, rois_shape = input_shape
-        return rois_shape[:2] + (self.pool_height, self.pool_width, x_shape[-1])  
+        return [(rois_shape[0], rois_shape[1], self.pool_height, self.pool_width, x_shape[-1]), ]#(None,1)]
     
 
 class Proposal_Target_layer(layers.Layer):
@@ -170,6 +170,7 @@ class Proposal_Target_layer(layers.Layer):
         rois = inputs[0][0]
         gt_bbox = inputs[1]
         labels = inputs[2]
+
         all_rois = tf.concat([rois, gt_bbox], axis=0)
 
         ious = compute_overlaps_tf(all_rois, gt_bbox)
@@ -187,7 +188,7 @@ class Proposal_Target_layer(layers.Layer):
         n_bg = self.cfg.N_ROIS - n_fg 
         idxs_fg = tf.cond(tf.shape(idxs_bg)[0]>0, lambda:self._choice(idxs_bg,n_bg),lambda: idxs_bg)
         
-        idxs = tf.squeeze(tf.concat([idxs_fg, idxs_bg], axis=0),axis=1)
+        idxs = tf.concat([idxs_fg, idxs_bg], axis=0)[:, 0]
         rois = tf.gather(all_rois, idxs)
         labels = tf.gather(labels, idxs)
 

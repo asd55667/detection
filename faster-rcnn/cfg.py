@@ -6,7 +6,7 @@ class Config:
     TEST_DIR = META_DIR + 'test/'
     OUTPUT_DIR = '/media/wcw/TOSHIBA_X/OID/output/'
     LEVEL_1_DIR = '/media/wcw/TOSHIBA_X/OID/output/level_1_files/'
-    MODEL_DIR = 1
+    MODEL_DIR = '/media/wcw/TOSHIBA_X/OID/models/'
     MIN_SIZE = 768 
     MAX_SIZE = 1024
     

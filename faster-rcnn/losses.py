@@ -41,12 +41,23 @@ def roi_class_loss(y_, y):
         y_ {[type]} -- [n_rois, 1]
         y {[type]} -- [batch_size=1, n_rois, n_classes]    
     """
-    print(y, y_)
+    
     n = tf.shape(y_)[0]
-    y = tf.squeeze(y, axis=0)
-    y_ = tf.cast(tf.squeeze(y_, axis=0), tf.int32)
-    # y = tf.reduce_max(y, axis=1)
+    y = y[0]
+    y_ = tf.cast(y_[:,0], tf.int32)
     return tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_, logits=y) / tf.cast(n, tf.float32)
+
+class Roi_class_loss(layers.Layer):
+    def __init__(self, name='roi_class_loss', **kwargs):
+        super(Roi_class_loss, self).__init__(name='roi_class_loss', **kwargs)
+
+    def call(self, inputs, **kwargs):
+        y_, y = inputs
+        n = tf.shape(y_)[0]
+        y = y[0]
+        y_ = tf.cast(y_[:,0], tf.int32)
+        return tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_, logits=y) / tf.cast(n, tf.float32)        
+
 
 
 def roi_bbox_loss(delta_, delta, labels, idxs_fg):
@@ -59,12 +70,12 @@ def roi_bbox_loss(delta_, delta, labels, idxs_fg):
         idxs_fg {[type]} -- [?, 1]
     """
 
-    delta = tf.reshape(delta, (-1, tf.shape(delta)[2], 4))
+    delta = delta[0]
 
     n = tf.shape(idxs_fg)[0]
     idxs0 = tf.range(n)
-    idxs1 = tf.gather(labels, idxs0)
-    idxs = tf.stack([idxs0, idxs1], axis=1)
+    idxs1 = tf.gather(tf.cast(labels, tf.int32), idxs0)
+    idxs = tf.stack([idxs0, idxs1[:,0]], axis=1)
 
     delta = tf.gather_nd(delta, idxs)
     delta_ = tf.gather(delta_, idxs0)

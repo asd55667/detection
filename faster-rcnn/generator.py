@@ -6,7 +6,7 @@ import numpy as np
 from PIL import Image
 
 from cfg import cfg
-from anchors import generate_anchors, bbox_transform
+from anchors import *
 
 class OIDGen(Sequence):
     def __init__(self, json_file, batch_size=cfg.BATCH_SIZE, min_size=cfg.MIN_SIZE, max_size=cfg.MAX_SIZE):
@@ -41,7 +41,7 @@ class OIDGen(Sequence):
             gt_bboxes.append(gt_bbox)
             labels.append(label)
             scales.append(scale)
-        return imgs, gt_bboxes, labels, scales
+        return img, gt_bbox, label, scale
     
     def img_path(self, idx):
         return self.annotations[self.idx2id[idx]]['p']
@@ -84,7 +84,6 @@ class ValidationGen(OIDGen):
         return self.dir + filename
     
     
-
 
 class TestGen(Sequence):
     def __init__(self, data_dir=cfg.TEST_DIR, batch_size=cfg.BATCH_SIZE, aug=cfg.MULTI_SCALE_TESTING):

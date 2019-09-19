@@ -36,29 +36,35 @@ class FF_RCNN:
             rois = RoiPooling()([self.backbone.outputs[0], proposals])
             logits2, delta2, scores = self.head(rois)
             delta2, scores = FilterDetections()([delta2, scores])
-            model = models.Model([self.backbone.inputs, scale_inp], [delta2, scores])
+            model = models.Model([self.backbone.inputs[0], scale_inp], [delta2, scores])
         else:
             gt_bbox_inp = layers.Input((4,))
             labels_inp = layers.Input((1,))             
             anchor_target_inp = layers.Input((5,))
 
             rois, delta2_, labels2, idxs_fg = Proposal_Target_layer(cfg)([proposals, gt_bbox_inp,labels_inp])
-            rois = RoiPooling()([self.backbone.outputs[0], rois])
-            logits2, delta2, scores = self.head(rois)
+            rois = RoiPooling()([self.backbone.outputs[0], rois])  # non_zero
 
+            logits2, delta2, scores = self.head(rois)
+                        
             rpn_cls_loss = layers.Lambda(lambda x: rpn_class_loss(*x), name='rpn_class_loss')([anchor_target_inp, logits])
-            rpn_box_loss = layers.Lambda(lambda x: rpn_bbox_loss(*x), name='rpn_bbox_loss')([anchor_target_inp, delta])                      
-            roi_cls_loss = layers.Lambda(lambda x: roi_class_loss(*x), name='roi_class_loss')([labels2, logits2])
+            rpn_box_loss = layers.Lambda(lambda x: rpn_bbox_loss(*x), name='rpn_bbox_loss')([anchor_target_inp, delta])  
+
+            # idxs = tf.cast(non_zero, tf.int32)
+            # labels2 = tf.gather(labels2, idxs)                    
+            # roi_cls_loss = layers.Lambda(lambda x: roi_class_loss(*x), name='roi_class_loss')([labels2, logits2])
+            roi_cls_loss = Roi_class_loss()([labels2, logits2])
             roi_box_loss = layers.Lambda(lambda x: roi_bbox_loss(*x), name='roi_bbox_loss')([delta2_, delta2, labels2, idxs_fg])
             
-            model = models.Model([self.backbone.inputs, gt_bbox_inp, labels_inp, scale_inp, anchor_target_inp], [logits, delta, logits2, delta2] +
-                                                [rpn_cls_loss, rpn_box_loss, roi_cls_loss, roi_box_loss])
+            
+            model = models.Model([self.backbone.inputs[0], gt_bbox_inp, labels_inp, scale_inp, anchor_target_inp], 
+                                 [logits, delta, logits2, delta2, rpn_cls_loss, rpn_box_loss, roi_cls_loss, roi_box_loss])
         return model
 
 
     def train(self, train_gen, val_gen, learning_rate, epochs, 
               augmentation=None, custom_callbacks=None, no_augmentation_sources=None):
-        assert self.mode == "training", "Create model in training mode."
+        assert self.mode == "train", "Create model in training mode."
 
 
         # Create log_dir if it does not exist
@@ -103,7 +109,7 @@ class FF_RCNN:
 
 
 
-    def load_weights(self, pth, by_name=None, exclude=True):
+    def load_weights(self, pth, by_name=True, exclude=None):
         import h5py
         from keras.engine import saving
 
@@ -114,33 +120,30 @@ class FF_RCNN:
         if 'layer_names' not in f.attrs and 'model_weights' in f:
             f = f['model_weights']
 
-        # print(list(f.attrs))
-        # list(zip([n.decode('utf8') for n in f.attrs['layer_names']], f.attrs['layer_names']))
+        print('\n', 'Pretrained layers')
+        pretrained_layers = list([n.decode('utf8') for n in f.attrs['layer_names']])
         # layers = self.model.inner_model.layers if hasattr(model, "inner_model") else self.model.layers
-        print('Pretrained layers')
+        
         ls = []
         for layer in self.model.layers:
             if hasattr(layer, 'layers'):
                 for l in layer.layers:
-                    try:
-                        if l.weights:
-                            print(l)
-                            ls.append(l)
-                    except: pass
+                    if l.name in pretrained_layers:
+                        print(l.name)
+                        ls.append(l)
             else:
-                try:
-                    if layer.weights:
-                        print(layer)
-                        ls.append(layer)    
-                except: pass        
+                if layer.name in pretrained_layers:
+                    print(layer.name)
+                    ls.append(layer)    
+ 
         
         if exclude:
-            layers = filter(lambda l: l.name not in exclude, layers)
+            ls = filter(lambda l: l.name not in exclude, ls)
 
         if by_name:
-            saving.load_weights_from_hdf5_group_by_name(f, layers)
+            saving.load_weights_from_hdf5_group_by_name(f, ls)
         else:
-            saving.load_weights_from_hdf5_group(f, layers)
+            saving.load_weights_from_hdf5_group(f, ls)
 
         for l in ls:
             l.trainable = False

@@ -1,5 +1,7 @@
 from faster_rcnn import FF_RCNN
 from generator import OIDGen, ValidationGen
+from cfg import cfg
+
 
 train_gen = OIDGen(json_file='split_1_annotation.json')
 val_gen = ValidationGen(json_file='validation_level_1.json')
