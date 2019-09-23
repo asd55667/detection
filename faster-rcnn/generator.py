@@ -28,21 +28,29 @@ class OIDGen(Sequence):
         np.random.shuffle(self.idx)
 
     def __getitem__(self, idx):
-        start = idx // self.batch_size
-        end = min(start + self.batch_size, len(self.idx))
+        # start = idx // self.batch_size
+        # end = min(start + self.batch_size, len(self.idx))
 
         imgs = []
         gt_bboxes = []
-        labels = []
         scales = []
-        for i in range(start, end):
-            img, gt_bbox, label, scale, anchor_target = self.load_img(i)
-            imgs.append(img)
-            gt_bboxes.append(gt_bbox)
-            labels.append(label)
-            scales.append(scale)
-        return img, gt_bbox, label, scale
+        anchor_targets = []
+        # for i in range(start, end):
+        img, scale, gt_bbox, labels, anchor_target = self.load_img(idx)
+        #     imgs.append(img)
+        #     scales.append(scale)
+        #     gt_bboxes.append(gt_bbox)
+        #     anchor_targets.append(anchor_target)
+        # imgs = np.concatenate(imgs, axis=0)
+        # while gt_bbox.shape[0] == 0:
+        #     i = np.random.randint(0, len(self))
+        #     img, scale, gt_bbox, labels, anchor_target = self.load_img(i)
+        scale = np.array([[scale]])
+        labels = np.array(labels)
+        labels = np.reshape(labels, (1,-1,1))
+        return [img, scale, gt_bbox[None, ], labels, anchor_target[None, ]] ,[]
     
+
     def img_path(self, idx):
         return self.annotations[self.idx2id[idx]]['p']
 
@@ -63,13 +71,25 @@ class OIDGen(Sequence):
 
         scale = min(self.min_size / min(h,w), self.max_size / max(h,w))
         img = Image.open(self.img_path(idx)).resize((int(w * scale), int(h * scale)))
-        img = np.expand_dims(np.array(img),0)
+        img = np.array(img)
+        if len(img.shape) == 2:
+            img = np.stack([img, img, img], axis=-1)
+        elif img.shape[-1] > 3:
+            img = img[:,:,:3]        
+
+        # mean=[0.485, 0.456, 0.406],
+        # std=[0.229, 0.224, 0.225]    
+        # img = (img/255. - mean ) / std
+        img = img / 255.
+
+        img = np.expand_dims(img,0)
+
         
         gt_bbox *= scale
         gt_bbox = np.array(np.round(gt_bbox), dtype=np.int32)
         anchor_target = get_anchor_target(img.shape[1:3] ,gt_bbox, cfg)
-        # after np.array(img) img.shape = (h, w, c)
-        return img, gt_bbox, labels, scale, anchor_target
+
+        return img, scale, gt_bbox, labels, anchor_target
 
 
 class ValidationGen(OIDGen):
@@ -111,7 +131,7 @@ class TestGen(Sequence):
         else:
             h, w = np.array(Image.open(self.pth[idx])).shape[:2]            
             scale = min(cfg.MIN_SIZE / min(h,w), cfg.MAX_SIZE / max(h,w))
-            img = Image.open(self.img_path(idx)).resize((int(w * scale), int(h * scale)))
+            img = Image.open(self.pth(idx)).resize((int(w * scale), int(h * scale)))
             img = np.expand_dims(np.array(img),0)        
             return img, scale    
             
@@ -158,22 +178,25 @@ def get_anchor_target(img_size, gt_bbox, cfg):
     n_bg = cfg.RPN_BATCH_SIZE - n_fg
     if len(neg_idxs) > n_bg:
         disabled = np.random.choice(neg_idxs, size=len(neg_idxs) - n_bg, replace=False)
-        labels[disabled] = -1
-    
-    delta_ = bbox_transform(anchors, gt_bbox[argmax_anchors,:])
-    
-    def _unmap(data, rows, idxs, fill):
-        if len(data.shape) == 1:
-            all_data = np.empty((rows, ), dtype=np.float32)
-            all_data.fill(fill)
-            all_data[idxs,] = data
-        else:
-            all_data = np.empty((rows,) + data.shape[1:], dtype=np.float32)
-            all_data.fill(fill)
-            all_data[idxs,:] = data
-        return all_data     
+        labels[disabled] = -1 
 
+    delta_ = bbox_transform(anchors, gt_bbox[argmax_anchors,:])
     anchor_labels = _unmap(labels, n, idxs_inside, -1)
     delta_ = _unmap(delta_, n, idxs_inside, 0)
-    return delta_, anchor_labels 
+    
+    return np.hstack([delta_, anchor_labels[:,None]])
 
+
+
+
+
+def _unmap(data, rows, idxs, fill):
+    if len(data.shape) == 1:
+        all_data = np.empty((rows, ), dtype=np.float32)
+        all_data.fill(fill)
+        all_data[idxs,] = data
+    else:
+        all_data = np.empty((rows,) + data.shape[1:], dtype=np.float32)
+        all_data.fill(fill)
+        all_data[idxs,:] = data
+    return all_data

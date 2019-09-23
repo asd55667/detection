@@ -14,23 +14,24 @@ import keras.backend as K
 
 import functools
 
-
 class FF_RCNN:
     def __init__(self, backbone, cfg, mode=None):
         self.cfg = cfg
         self.backbone = backbone
-        self.__rpn = RPN(cfg, mode)
+        self.rpn = RPN(cfg)()
         self.head = functools.partial(head, cfg=cfg)
         self.model = self.build_model(cfg, mode)
         self.mode = mode
         
-    def build_model(self,cfg, mode):
-        scale_inp = layers.Input((1,))
+    def build_model(self, cfg, mode):
+        scale_inp = layers.Input((1, ))
         # (h , w)
-        img_size = tf.cast(tf.shape(self.backbone.inputs)[1:3], tf.float32)
-      
-        self.rpn = self.__rpn(img_size, scale_inp[0])
-        logits, delta, proposals = self.rpn(self.backbone.outputs)    
+        img_size = tf.cast(tf.shape(self.backbone.inputs[0])[1:3], tf.float32)
+        map_size = tf.cast(tf.shape(self.backbone.outputs[0])[1:3], tf.float32)
+        
+        logits, delta, scores1 = self.rpn(self.backbone.outputs[0])
+        
+        proposals = Proposal_layer(img_size, map_size, scale_inp, cfg, mode)([delta, scores1])
         
         if mode == 'inference':
             rois = RoiPooling()([self.backbone.outputs[0], proposals])
@@ -38,27 +39,23 @@ class FF_RCNN:
             delta2, scores = FilterDetections()([delta2, scores])
             model = models.Model([self.backbone.inputs[0], scale_inp], [delta2, scores])
         else:
-            gt_bbox_inp = layers.Input((4,))
-            labels_inp = layers.Input((1,))             
-            anchor_target_inp = layers.Input((5,))
+            gt_bbox_inp = layers.Input((None, 4))
+            labels_inp = layers.Input((None, 1))            
+            anchor_target_inp = layers.Input((None, 5))
 
             rois, delta2_, labels2, idxs_fg = Proposal_Target_layer(cfg)([proposals, gt_bbox_inp,labels_inp])
-            rois = RoiPooling()([self.backbone.outputs[0], rois])  # non_zero
-
+            rois = RoiPooling()([self.backbone.outputs[0], rois])  
+            
             logits2, delta2, scores = self.head(rois)
                         
-            rpn_cls_loss = layers.Lambda(lambda x: rpn_class_loss(*x), name='rpn_class_loss')([anchor_target_inp, logits])
-            rpn_box_loss = layers.Lambda(lambda x: rpn_bbox_loss(*x), name='rpn_bbox_loss')([anchor_target_inp, delta])  
-
-            # idxs = tf.cast(non_zero, tf.int32)
-            # labels2 = tf.gather(labels2, idxs)                    
-            # roi_cls_loss = layers.Lambda(lambda x: roi_class_loss(*x), name='roi_class_loss')([labels2, logits2])
+            rpn_cls_loss = Rpn_class_loss()([anchor_target_inp, logits])
+            rpn_box_loss = Rpn_bbox_loss()([anchor_target_inp, delta])      
             roi_cls_loss = Roi_class_loss()([labels2, logits2])
-            roi_box_loss = layers.Lambda(lambda x: roi_bbox_loss(*x), name='roi_bbox_loss')([delta2_, delta2, labels2, idxs_fg])
+            roi_box_loss = Roi_bbox_loss()([delta2_, delta2, labels2, idxs_fg])
             
             
-            model = models.Model([self.backbone.inputs[0], gt_bbox_inp, labels_inp, scale_inp, anchor_target_inp], 
-                                 [logits, delta, logits2, delta2, rpn_cls_loss, rpn_box_loss, roi_cls_loss, roi_box_loss])
+            model = models.Model([self.backbone.inputs[0], scale_inp, gt_bbox_inp, labels_inp, anchor_target_inp], 
+                                 [logits, delta, rpn_cls_loss, rpn_box_loss, logits2, delta2, ])#roi_cls_loss, roi_box_loss])
         return model
 
 
@@ -87,8 +84,6 @@ class FF_RCNN:
         print("Checkpoint Path: {}".format(self.checkpoint_path))
         self.compile(learning_rate, self.cfg.LEARNING_MOMENTUM)
 
-        # Work-around for Windows: Keras fails on Windows when using
-        # multiprocessing workers. See discussion here:
         # https://github.com/matterport/Mask_RCNN/issues/13#issuecomment-353124009
         import multiprocessing
         workers = multiprocessing.cpu_count()
@@ -97,13 +92,11 @@ class FF_RCNN:
             train_gen,
             initial_epoch=self.epoch,
             epochs=epochs,
-            # steps_per_epoch=self.cfg.STEPS_PER_EPOCH,
+            steps_per_epoch=self.cfg.STEPS_PER_EPOCH,
             callbacks=callbacks,
-            validation_data=val_gen,
-            # validation_steps=self.cfg.VALIDATION_STEPS,
             max_queue_size=100,
-            workers=workers,
-            use_multiprocessing=True,
+            # workers=workers,
+            # use_multiprocessing=True,
         )
         self.epoch = max(self.epoch, epochs)
 
@@ -120,7 +113,7 @@ class FF_RCNN:
         if 'layer_names' not in f.attrs and 'model_weights' in f:
             f = f['model_weights']
 
-        print('\n', 'Pretrained layers')
+        # print('\n', 'Pretrained layers')
         pretrained_layers = list([n.decode('utf8') for n in f.attrs['layer_names']])
         # layers = self.model.inner_model.layers if hasattr(model, "inner_model") else self.model.layers
         
@@ -129,11 +122,11 @@ class FF_RCNN:
             if hasattr(layer, 'layers'):
                 for l in layer.layers:
                     if l.name in pretrained_layers:
-                        print(l.name)
+                        # print(l.name)
                         ls.append(l)
             else:
                 if layer.name in pretrained_layers:
-                    print(layer.name)
+                    # print(layer.name)
                     ls.append(layer)    
  
         
@@ -151,8 +144,8 @@ class FF_RCNN:
         if hasattr(f, 'close'):
             f.close()        
         
-        print('Trainable layers')
-        self.get_trainable_layers()
+        # print('Trainable layers')
+        # self.get_trainable_layers()
         self.set_log_dir(pth)
     
 
@@ -211,8 +204,8 @@ class FF_RCNN:
         self.model._losses = []
         self.model._per_input_losses = {}
         loss_names = [
-            "rpn_class_loss",  "rpn_bbox_loss",
-            "roi_class_loss", "roi_bbox_loss"]
+            "rpn_class_loss",  "rpn_bbox_loss",]
+            # "roi_class_loss", "roi_bbox_loss"]
         for name in loss_names:
             layer = self.model.get_layer(name)
             if layer.output in self.model.losses:
@@ -255,22 +248,21 @@ class FF_RCNN:
         return layers        
 
 
-
 def head(x, cfg):
     # x (batch_size=1, rois, pool_height,pool_width, channels)            
-    x = layers.TimeDistributed(layers.Conv2D(cfg.FC_LAYERS, (7,7),))(x)
-    x = layers.TimeDistributed(layers.BatchNormalization())(x)
+    x = layers.TimeDistributed(layers.Conv2D(cfg.FC_LAYERS, (7,7)), name='flatten_conv1')(x)
+    x = layers.TimeDistributed(layers.BatchNormalization(), name='faltten_bn1')(x)
     x = layers.TimeDistributed(layers.ReLU())(x)
-    x = layers.TimeDistributed(layers.Conv2D(cfg.FC_LAYERS, (1,1),))(x)
-    x = layers.TimeDistributed(layers.BatchNormalization())(x)
+    x = layers.TimeDistributed(layers.Conv2D(cfg.FC_LAYERS, (1,1)), name='flatten_conv2')(x)
+    x = layers.TimeDistributed(layers.BatchNormalization(), name='faltten_bn2')(x)
     x = layers.TimeDistributed(layers.ReLU())(x)
-    shared = layers.Lambda(lambda x: tf.squeeze(tf.squeeze(x, 3), 2),)(x)
-    logits2 = layers.TimeDistributed(layers.Dense(cfg.N_CLASSES))(shared)
+    shared = layers.Lambda(lambda x: tf.squeeze(tf.squeeze(x, 3), 2), name='flatten')(x)
+    logits2 = layers.TimeDistributed(layers.Dense(cfg.N_CLASSES), name='fc1')(shared)
     scores2 = layers.TimeDistributed(layers.Softmax())(logits2)
-    bbox = layers.TimeDistributed(layers.Dense(4*cfg.N_CLASSES))(shared)
-    bbox = layers.Reshape((K.int_shape(bbox)[1],cfg.N_CLASSES,4))(bbox)
-    return logits2, bbox, scores2
-
+    delta2 = layers.TimeDistributed(layers.Dense(4*cfg.N_CLASSES), name='fc2')(shared)
+    delta2 = layers.Reshape((-1, cfg.N_CLASSES,4))(delta2)
+    return logits2, delta2, scores2
+    
 
 
 def filter_detections(

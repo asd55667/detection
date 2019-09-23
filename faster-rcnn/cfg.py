@@ -55,8 +55,8 @@ class Config:
     LEARNING_MOMENTUM = 0.9
     WEIGHT_DECAY = 5e-4
     GRADIENT_CLIP_NORM = 5.
-    # VALIDATION_STEPS = 
-    # STEPS_PER_EPOCH = 
+    VALIDATION_STEPS = 100 
+    STEPS_PER_EPOCH = 300
     
     LOSS_WEIGHTS = {"rpn_class_loss": 1.,  "rpn_bbox_loss": 1. , "roi_class_loss": 1., "roi_bbox_loss": 1.}
 

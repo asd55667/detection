@@ -8,17 +8,15 @@ import keras.backend as K
 import numpy as np
 import tensorflow as tf 
 
-from cfg import cfg
 
 class RPN:
-    def __init__(self, cfg, mode):
+    def __init__(self, cfg,):
         self.n_channels = cfg.N_CHANNELS
         self.anchors = generate_anchors(cfg.BASE_SIZE, cfg.ANCHOR_RATIO, cfg.ANCHOR_SCALE)
         self.n_anchors = self.anchors.shape[0]
         self.cfg = cfg
-        self.mode = mode
 
-    def __call__(self, img_size, scale):
+    def __call__(self, ):
         inp = layers.Input((None,None, self.n_channels))
         map_size = tf.shape(inp)[1:3]
         shared = layers.Conv2D(self.n_channels, 3, activation='relu', padding='SAME',
@@ -30,7 +28,7 @@ class RPN:
                             kernel_initializer=initializers.random_normal(stddev=0.01),
                             kernel_regularizer=regularizers.l2(1.0),
                             bias_regularizer=regularizers.l2(2.0))(shared)
-        logits = layers.Lambda(lambda x: tf.reshape(x, (tf.shape(x)[0],-1,2)))(logits)
+        logits = layers.Reshape((-1, 2))(logits)
 
         score = layers.Softmax()(logits)
 
@@ -38,10 +36,10 @@ class RPN:
                             kernel_initializer=initializers.random_normal(stddev=0.01),
                             kernel_regularizer=regularizers.l2(1.0),
                             bias_regularizer=regularizers.l2(2.0))(shared)
-        delta = layers.Lambda(lambda x: tf.reshape(x, (tf.shape(x)[0],-1,4)))(delta)
-        proposals = Proposal_layer(img_size, map_size, scale, self.cfg, self.mode)([delta, score])
+        delta = layers.Reshape((-1,4))(delta)
         
-        model = models.Model(inp, [logits, delta, proposals])
+        
+        model = models.Model(inp, [logits, delta, score])
         return model
 
 
@@ -69,17 +67,18 @@ class Proposal_layer(layers.Layer):
         all_anchors = shift(self.anchors, self.cfg.FEAT_STRIDE, self.map_size)    
         
         proposals = bbox_transform_inv(all_anchors, delta[0])      
-        proposals = ClipBbox()([proposals, self.img_size * self.scale])
+        proposals = ClipBbox()([proposals, self.img_size * self.scale[0]])
 
         w = proposals[:, 2] - proposals[:, 0]
         h = proposals[:, 3] - proposals[:, 1]
 
-        keep = tf.reshape(tf.where(tf.logical_and(w>=self.cfg.RPN_MIN_SIZE,h>=self.cfg.RPN_MIN_SIZE)),[-1])
+        keep = tf.cast(tf.logical_and(w>=self.cfg.RPN_MIN_SIZE,h>=self.cfg.RPN_MIN_SIZE), tf.int32)
         
         proposals = tf.gather(proposals,keep)
         score = tf.gather(score, keep)
 
-        score, keep = tf.nn.top_k(score, self.pre_nms_n)
+        k = tf.shape(score)[0]
+        score, keep = tf.cond(self.pre_nms_n<=k, lambda: tf.nn.top_k(score, self.pre_nms_n), lambda: tf.nn.top_k(score, k))
         proposals = tf.gather(proposals, keep)
 
         keep = tf.image.non_max_suppression(proposals, score, self.post_nms_n, self.cfg.NMS_THRESH)
@@ -111,53 +110,8 @@ class ClipBbox(layers.Layer):
         return input_shape[1]    
 
 
-class RoiPooling(layers.Layer):
-    def __init__(self, pool_width=7, pool_height=7,):
-        super(RoiPooling, self).__init__()
-        self.pool_width = pool_width
-        self.pool_height = pool_height
 
-    def call(self, inputs):
-        """[summary]
-        
-        Arguments:
-            x {[type]} -- [1, H, W, C]
-            rois {[type]} -- [POST_NMS_N, 4]
-        Returns:
-            [type] -- [1, POST_NMS_N, pool_heigt, pool_widtd, C]
-        """
-        x, rois = inputs
-        # non_zero, rois = self._trim_pad(rois)
 
-        def fn(inp):
-            # H, W
-            x_shape = tf.shape(x)[1:3][::-1]
-            scale = tf.cast(tf.tile(x_shape, (2,)), tf.float32)
-            roi = tf.cast(inp / scale, tf.int32)
-            w_stride = (roi[2] - roi[0]) // self.pool_width
-            h_stride = (roi[3] - roi[1]) // self.pool_height
-#             roi_pool = tf.image.resize_images(x[0, roi[1]:roi[3], roi[0]:roi[2],:], [self.pool_height,self.pool_width],)            
-            roi_pool = []
-            for i in range(self.pool_height):
-                h_start = roi[1] + i * h_stride
-                for j in range(self.pool_width):
-                    w_start = roi[0] + j * w_stride
-                    val = tf.reduce_max(x[0, h_start:h_start+h_stride, w_start:w_start+w_stride, :], axis=0)
-                    roi_pool.append(val)
-            roi_pool = tf.reshape(tf.stack(roi_pool,axis=0), (self.pool_height,self.pool_width, -1))
-            return roi_pool
-        rois_pool = tf.map_fn(fn, rois)
-        return [rois_pool[None,]]#, non_zero]
-    
-    def _trim_pad(self, rois):
-        non_zero = tf.equal(tf.reduce_sum(tf.abs(rois), axis=1), 0)
-        rois = tf.boolean_mask(rois, non_zero)
-        return non_zero, rois
-
-    def compute_output_shape(self, input_shape):
-        x_shape, rois_shape = input_shape
-        return [(rois_shape[0], rois_shape[1], self.pool_height, self.pool_width, x_shape[-1]), ]#(None,1)]
-    
 
 class Proposal_Target_layer(layers.Layer):
     def __init__(self, cfg, mean=None, std=None, **kwargs):
@@ -168,8 +122,10 @@ class Proposal_Target_layer(layers.Layer):
 
     def call(self, inputs, **kwargs):
         rois = inputs[0][0]
-        gt_bbox = inputs[1]
-        labels = inputs[2]
+        gt_bbox = inputs[1][0]
+        labels = inputs[2][0]
+        
+        _, rois = self._trim_pad(rois)
 
         all_rois = tf.concat([rois, gt_bbox], axis=0)
 
@@ -203,6 +159,12 @@ class Proposal_Target_layer(layers.Layer):
 
         return [rois, delta2_, labels, idxs_fg]
 
+
+            
+    def _trim_pad(self, rois):
+        non_zero = tf.equal(tf.reduce_sum(tf.abs(rois), axis=1), 0)
+        rois = tf.boolean_mask(rois, non_zero)
+        return non_zero, rois
     
     def _choice_replacement(self, inputs, n_samples):
         log = tf.expand_dims(tf.zeros(tf.shape(inputs)[0]), 0)
@@ -221,6 +183,52 @@ class Proposal_Target_layer(layers.Layer):
 
 
 
+class RoiPooling(layers.Layer):
+    def __init__(self, pool_width=7, pool_height=7,):
+        super(RoiPooling, self).__init__()
+        self.pool_width = pool_width
+        self.pool_height = pool_height
+
+    def call(self, inputs):
+        """[summary]
+        
+        Arguments:
+            x {[type]} -- [1, H, W, C]
+            rois {[type]} -- [N_ROIS, 4]
+        Returns:
+            [type] -- [1, N_ROIS, pool_heigt, pool_widtd, C]
+        """
+        x, rois = inputs
+
+
+        def fn(inp):
+            # H, W
+            x_shape = tf.shape(x)[1:3][::-1]
+            scale = tf.cast(tf.tile(x_shape, (2,)), tf.float32)
+            roi = tf.cast(inp / scale, tf.int32)
+            w_stride = (roi[2] - roi[0]) // self.pool_width
+            h_stride = (roi[3] - roi[1]) // self.pool_height
+#             roi_pool = tf.image.resize_images(x[0, roi[1]:roi[3], roi[0]:roi[2],:], [self.pool_height,self.pool_width],)            
+            roi_pool = []
+            for i in range(self.pool_height):
+                h_start = roi[1] + i * h_stride
+                for j in range(self.pool_width):
+                    w_start = roi[0] + j * w_stride
+                    val = tf.reduce_max(x[0, h_start:h_start+h_stride, w_start:w_start+w_stride, :], axis=[0,1])
+                    roi_pool.append(val)
+            roi_pool = tf.reshape(tf.stack(roi_pool,axis=0), (self.pool_height,self.pool_width, -1))
+            return roi_pool
+        rois_pool = tf.map_fn(fn, rois)
+        return [rois_pool[None,]]#, non_zero]
+
+    def compute_output_shape(self, input_shape):
+        x_shape, rois_shape = input_shape
+        return [(rois_shape[0], rois_shape[1], self.pool_height, self.pool_width, x_shape[-1]), ]#(None,1)]
+    
+
+
+
+
 
 class RoiAlian(layers.Layer):
     def __init__(self, pool_height, pool_width):
@@ -230,7 +238,7 @@ class RoiAlian(layers.Layer):
     def call(self, inp, **args):
         x, rois = inp
         x_shape = x.shape.as_list()[1:3]
-        x = tf.pad(x, [0,0],[1,1],[1,1],[0,0], method='SYMMETRIC')
+        # x = tf.pad(x, [0,0],[1,1],[1,1],[0,0], method='SYMMETRIC')
         rois += 1
 
         x0,y0,x1,y1 = tf.split(rois, 4, 1)
@@ -245,11 +253,11 @@ class RoiAlian(layers.Layer):
         rois =  tf.concat([xx, yy, xx+w, yy+h], axis=1)
         roi_pools = tf.image.crop_and_resize(x, rois, rois, tf.zeros([tf.shape(rois)[0]], dtype=tf.int32), 
                                              [self.pool_width, self.pool_height])
-        roi_pools = tf.nn.avg_pool(ret, [1,1,2,2,], [1,1,2,2], padding="SAME")
+        roi_pools = tf.nn.avg_pool(rois, [1,1,2,2,], [1,1,2,2], padding="SAME")
         return roi_pools
 
     def compute_output_shape(self, input_shape):
-        x, rois = inp
+        x, rois = input_shape
         return (None,) + x[1:]
 
 
